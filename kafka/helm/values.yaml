@@ -1,0 +1,70 @@
+# Kafka Helm Chart Configuration
+replicaCount: 3
+
+kafka:
+  image:
+    repository: confluentinc/cp-kafka
+    tag: "7.5.0"
+    pullPolicy: IfNotPresent
+
+  resources:
+    requests:
+      memory: "2Gi"
+      cpu: "1000m"
+    limits:
+      memory: "4Gi"
+      cpu: "2000m"
+
+  persistence:
+    enabled: true
+    size: 100Gi
+    storageClass: "standard"
+
+  config:
+    # Replication factor for fault tolerance
+    default.replication.factor: 3
+    min.insync.replicas: 2
+    
+    # Log retention
+    log.retention.hours: 168  # 7 days
+    log.retention.bytes: 1073741824  # 1GB per partition
+    log.segment.bytes: 1073741824
+    
+    # Performance tuning
+    num.network.threads: 8
+    num.io.threads: 8
+    socket.send.buffer.bytes: 102400
+    socket.receive.buffer.bytes: 102400
+    socket.request.max.bytes: 104857600
+    
+    # Producer settings
+    compression.type: "lz4"
+    
+    # Consumer settings
+    auto.create.topics.enable: true
+    delete.topic.enable: true
+
+  topics:
+    - name: logs-ingestion
+      partitions: 12
+      replicationFactor: 3
+      config:
+        retention.ms: 604800000  # 7 days
+        compression.type: "lz4"
+        min.insync.replicas: 2
+
+zookeeper:
+  enabled: true
+  replicaCount: 3
+  persistence:
+    enabled: true
+    size: 10Gi
+
+service:
+  type: ClusterIP
+  port: 9092
+
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: true
