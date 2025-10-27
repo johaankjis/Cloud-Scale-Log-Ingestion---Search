@@ -1,0 +1,11 @@
+apiVersion: v2
+name: clickhouse-cluster
+description: ClickHouse cluster for log storage and analytics
+type: application
+version: 1.0.0
+appVersion: "23.8"
+
+dependencies:
+  - name: clickhouse
+    version: "4.1.0"
+    repository: https://charts.bitnami.com/bitnami

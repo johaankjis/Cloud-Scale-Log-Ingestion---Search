@@ -1,0 +1,59 @@
+# ClickHouse Helm Chart Configuration
+replicaCount: 3
+
+image:
+  repository: clickhouse/clickhouse-server
+  tag: "23.8"
+  pullPolicy: IfNotPresent
+
+resources:
+  requests:
+    memory: "4Gi"
+    cpu: "2000m"
+  limits:
+    memory: "8Gi"
+    cpu: "4000m"
+
+persistence:
+  enabled: true
+  size: 500Gi
+  storageClass: "fast-ssd"
+
+service:
+  type: ClusterIP
+  httpPort: 8123
+  tcpPort: 9000
+  interserverPort: 9009
+
+# Sharding and replication (for production)
+shards: 2
+replicas: 2
+
+# Zookeeper for coordination
+zookeeper:
+  enabled: true
+  replicaCount: 3
+  persistence:
+    enabled: true
+    size: 10Gi
+
+# Configuration
+config:
+  # Custom config.xml mounted as ConfigMap
+  custom: true
+
+# Metrics
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+    interval: 30s
+
+# Init scripts
+initScripts:
+  enabled: true
+  scripts:
+    01_create_database.sql: |
+      CREATE DATABASE IF NOT EXISTS logs;
+    02_create_logs_table.sql: |
+      -- Schema creation script content
