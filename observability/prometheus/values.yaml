@@ -1,0 +1,207 @@
+# Prometheus Helm Chart Configuration
+server:
+  enabled: true
+  replicaCount: 2
+  
+  resources:
+    requests:
+      memory: "2Gi"
+      cpu: "1000m"
+    limits:
+      memory: "4Gi"
+      cpu: "2000m"
+  
+  persistentVolume:
+    enabled: true
+    size: 100Gi
+    storageClass: "fast-ssd"
+  
+  retention: "30d"
+  
+  global:
+    scrape_interval: 30s
+    scrape_timeout: 10s
+    evaluation_interval: 30s
+
+alertmanager:
+  enabled: true
+  replicaCount: 2
+  
+  config:
+    global:
+      resolve_timeout: 5m
+    
+    route:
+      group_by: ['alertname', 'cluster', 'service']
+      group_wait: 10s
+      group_interval: 10s
+      repeat_interval: 12h
+      receiver: 'default'
+    
+    receivers:
+    - name: 'default'
+      webhook_configs:
+      - url: 'http://alertmanager-webhook:8080/alerts'
+
+serverFiles:
+  prometheus.yml:
+    scrape_configs:
+      # Kubernetes API server
+      - job_name: 'kubernetes-apiservers'
+        kubernetes_sd_configs:
+        - role: endpoints
+        scheme: https
+        tls_config:
+          ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+        bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+        relabel_configs:
+        - source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_service_name, __meta_kubernetes_endpoint_port_name]
+          action: keep
+          regex: default;kubernetes;https
+      
+      # Kubernetes nodes
+      - job_name: 'kubernetes-nodes'
+        kubernetes_sd_configs:
+        - role: node
+        scheme: https
+        tls_config:
+          ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+        bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+      
+      # Log pipeline services
+      - job_name: 'log-ingestion-service'
+        kubernetes_sd_configs:
+        - role: pod
+          namespaces:
+            names:
+            - log-pipeline
+        relabel_configs:
+        - source_labels: [__meta_kubernetes_pod_label_app]
+          action: keep
+          regex: log-ingestion-service
+        - source_labels: [__meta_kubernetes_pod_ip]
+          target_label: __address__
+          replacement: ${1}:8080
+      
+      - job_name: 'log-indexer'
+        kubernetes_sd_configs:
+        - role: pod
+          namespaces:
+            names:
+            - log-pipeline
+        relabel_configs:
+        - source_labels: [__meta_kubernetes_pod_label_app]
+          action: keep
+          regex: log-indexer
+        - source_labels: [__meta_kubernetes_pod_ip]
+          target_label: __address__
+          replacement: ${1}:8080
+      
+      - job_name: 'query-api'
+        kubernetes_sd_configs:
+        - role: pod
+          namespaces:
+            names:
+            - log-pipeline
+        relabel_configs:
+        - source_labels: [__meta_kubernetes_pod_label_app]
+          action: keep
+          regex: query-api
+        - source_labels: [__meta_kubernetes_pod_ip]
+          target_label: __address__
+          replacement: ${1}:8000
+      
+      # Kafka metrics
+      - job_name: 'kafka'
+        kubernetes_sd_configs:
+        - role: pod
+          namespaces:
+            names:
+            - log-pipeline
+        relabel_configs:
+        - source_labels: [__meta_kubernetes_pod_label_app]
+          action: keep
+          regex: kafka
+        - source_labels: [__meta_kubernetes_pod_ip]
+          target_label: __address__
+          replacement: ${1}:9308
+      
+      # ClickHouse metrics
+      - job_name: 'clickhouse'
+        kubernetes_sd_configs:
+        - role: pod
+          namespaces:
+            names:
+            - log-pipeline
+        relabel_configs:
+        - source_labels: [__meta_kubernetes_pod_label_app]
+          action: keep
+          regex: clickhouse
+        - source_labels: [__meta_kubernetes_pod_ip]
+          target_label: __address__
+          replacement: ${1}:9363
+
+  alerts.yml:
+    groups:
+    - name: log_pipeline_alerts
+      interval: 30s
+      rules:
+      # High ingestion lag
+      - alert: HighKafkaConsumerLag
+        expr: kafka_consumer_lag > 100000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High Kafka consumer lag detected"
+          description: "Consumer lag is {{ $value }} messages for {{ $labels.topic }}"
+      
+      # High error rate
+      - alert: HighErrorRate
+        expr: rate(log_errors_total[5m]) > 100
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High error rate in log pipeline"
+          description: "Error rate is {{ $value }} errors/sec"
+      
+      # Service down
+      - alert: ServiceDown
+        expr: up{job=~"log-.*"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Service {{ $labels.job }} is down"
+          description: "Service has been down for more than 2 minutes"
+      
+      # High memory usage
+      - alert: HighMemoryUsage
+        expr: container_memory_usage_bytes{namespace="log-pipeline"} / container_spec_memory_limit_bytes{namespace="log-pipeline"} > 0.9
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High memory usage in {{ $labels.pod }}"
+          description: "Memory usage is {{ $value | humanizePercentage }}"
+      
+      # High CPU usage
+      - alert: HighCPUUsage
+        expr: rate(container_cpu_usage_seconds_total{namespace="log-pipeline"}[5m]) > 0.8
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High CPU usage in {{ $labels.pod }}"
+          description: "CPU usage is {{ $value | humanizePercentage }}"
+      
+      # ClickHouse disk space
+      - alert: ClickHouseDiskSpaceLow
+        expr: clickhouse_disk_free_bytes / clickhouse_disk_total_bytes < 0.1
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "ClickHouse disk space low"
+          description: "Only {{ $value | humanizePercentage }} disk space remaining"

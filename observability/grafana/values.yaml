@@ -1,0 +1,90 @@
+# Grafana Helm Chart Configuration
+replicas: 2
+
+resources:
+  requests:
+    memory: "512Mi"
+    cpu: "500m"
+  limits:
+    memory: "1Gi"
+    cpu: "1000m"
+
+persistence:
+  enabled: true
+  size: 10Gi
+  storageClass: "standard"
+
+adminUser: admin
+adminPassword: changeme
+
+datasources:
+  datasources.yaml:
+    apiVersion: 1
+    datasources:
+    - name: Prometheus
+      type: prometheus
+      url: http://prometheus-server:80
+      access: proxy
+      isDefault: true
+    - name: ClickHouse
+      type: vertamedia-clickhouse-datasource
+      url: http://clickhouse:8123
+      access: proxy
+      database: logs
+
+dashboardProviders:
+  dashboardproviders.yaml:
+    apiVersion: 1
+    providers:
+    - name: 'default'
+      orgId: 1
+      folder: ''
+      type: file
+      disableDeletion: false
+      editable: true
+      options:
+        path: /var/lib/grafana/dashboards/default
+
+dashboards:
+  default:
+    log-pipeline-overview:
+      json: |
+        {
+          "dashboard": {
+            "title": "Log Pipeline Overview",
+            "panels": [
+              {
+                "title": "Ingestion Rate",
+                "targets": [
+                  {
+                    "expr": "rate(kafka_messages_in_total[5m])"
+                  }
+                ]
+              },
+              {
+                "title": "Consumer Lag",
+                "targets": [
+                  {
+                    "expr": "kafka_consumer_lag"
+                  }
+                ]
+              },
+              {
+                "title": "Query Latency p95",
+                "targets": [
+                  {
+                    "expr": "histogram_quantile(0.95, rate(query_duration_seconds_bucket[5m]))"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+
+plugins:
+  - grafana-piechart-panel
+  - vertamedia-clickhouse-datasource
+
+service:
+  type: LoadBalancer
+  port: 80
