@@ -1,0 +1,114 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: log-indexer
+  namespace: log-pipeline
+  labels:
+    app: log-indexer
+    component: indexer
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: log-indexer
+  template:
+    metadata:
+      labels:
+        app: log-indexer
+        component: indexer
+    spec:
+      containers:
+      - name: indexer
+        image: log-indexer:latest
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: KAFKA_BOOTSTRAP_SERVERS
+          value: "kafka:9092"
+        - name: KAFKA_TOPIC
+          value: "logs-ingestion"
+        - name: KAFKA_GROUP_ID
+          value: "log-indexer-group"
+        - name: CLICKHOUSE_HOST
+          value: "clickhouse"
+        - name: CLICKHOUSE_PORT
+          value: "9000"
+        - name: CLICKHOUSE_DATABASE
+          value: "logs"
+        - name: BATCH_SIZE
+          value: "1000"
+        - name: BATCH_TIMEOUT_MS
+          value: "5000"
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "1000m"
+          limits:
+            memory: "2Gi"
+            cpu: "2000m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 60
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+      - name: health-check
+        image: log-indexer-health:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8080
+          name: http
+        env:
+        - name: KAFKA_BOOTSTRAP_SERVERS
+          value: "kafka:9092"
+        - name: CLICKHOUSE_HOST
+          value: "clickhouse"
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: log-indexer-hpa
+  namespace: log-pipeline
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: log-indexer
+  minReplicas: 3
+  maxReplicas: 15
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 75
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: log-indexer-pdb
+  namespace: log-pipeline
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: log-indexer
